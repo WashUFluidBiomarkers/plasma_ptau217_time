@@ -1,37 +1,45 @@
-# Created by Kellen Petersen, July 1, 2025
+# Originally created by Kellen Petersen, July 1, 2025
+# Updated by Kellen Petersen, September 12, 2025
 
+# Load required libraries for survival analysis and parallel processing
 library(tidyverse)
 library(survival)
 library(here)
 library(icenReg)
 library(doParallel)
 
-setwd("<SET WORKING DIRECTORY>")
+setwd("")
 
+# Resolve function conflicts 
 conflicts_prefer(dplyr::last)
 conflicts_prefer(dplyr::lag)
 
-all_or_healthy <- "HEALTHY"
-which_dataset <-  "KADRC"
-which_method <- "TIRA"
-n_boot <- 5000
-n_cores <- 8
+# Set analysis parameters
+all_or_healthy <- "HEALTHY"  # Restrict to healthy participants at baseline
+which_dataset <-  "KADRC"   # Dataset selection
+which_method <- "TIRA"       # Modeling method
+n_boot <- 5000              # Bootstrap samples for confidence intervals
+n_cores <- 8                # Parallel processing cores
 
+# Load biomarker data based on dataset and method combination
 if (which_dataset == "KADRC" & which_method == "TIRA") {
-  df0 <- read.csv(here("results","<LOAD DATA>"))
+  df0 <- read.csv(here("results","TrajPlotData_KADRC_dataset_TIRA_method_FINAL.csv"))
 } else if (which_dataset == "KADRC" & which_method == "SILA") {
-  df0 <- read.csv(here("results","<LOAD DATA>"))
+  df0 <- read.csv(here("results","TrajPlotData_KADRC_dataset_SILA_method_FINAL.csv"))
 } else if (which_dataset == "ADNI" & which_method == "TIRA") {
-  df0 <- read.csv(here("results","<LOAD DATA>"))
+  df0 <- read.csv(here("results","TrajPlotData_ADNI_dataset_TIRA_method_FINAL.csv"))
 } else if (which_dataset == "ADNI" & which_method == "SILA") {
-  df0 <- read.csv(here("results","<LOAD DATA>"))
+  df0 <- read.csv(here("results","TrajPlotData_ADNI_dataset_SILA_method_FINAL.csv"))
 }
 
+# Process clinical outcome data based on dataset
 if (which_dataset =="ADNI") {
-  cdr0 <- read.csv(here("data_raw","<LOAD DATA>"))
-  dx0 <- read.csv(here("data_raw","<LOAD DATA>"))
-  demo0 <- read.csv(here("data_raw","<LOAD DATA>"))
+  # Load ADNI clinical assessment files
+  cdr0 <- read.csv(here("data_raw","CDRSB.csv"))
+  dx0 <- read.csv(here("data_raw","DXSUM_PDXCONV_ADNIALL.csv"))
+  demo0 <- read.csv(here("data_raw","PTDEMOG.csv"))
   
+  # Process CDR (Clinical Dementia Rating) data
   cdr <- cdr0 %>% 
     select(RID, VISCODE, VISCODE2, VISDATE, CDGLOBAL) %>% 
     rename(ID = RID, CDR = CDGLOBAL, TESTDATE_CDR = VISDATE) %>%
@@ -40,6 +48,7 @@ if (which_dataset =="ADNI") {
     select(-c(VISCODE, VISCODE2)) %>% 
     relocate(ID, VISCODE3, TESTDATE_CDR, CDR)
   
+  # Process diagnostic data
   dx <- dx0 %>% 
     select(RID, VISCODE, VISCODE2, EXAMDATE, DIAGNOSIS, DXMDUE, DXDDUE) %>% 
     rename(ID = RID) %>%
@@ -48,6 +57,7 @@ if (which_dataset =="ADNI") {
     select(-c(VISCODE, VISCODE2, EXAMDATE)) %>% 
     relocate(ID, VISCODE3, DIAGNOSIS, DXMDUE, DXDDUE)
   
+  # Combine CDR and diagnostic information
   CDR_DX <- cdr %>% 
     full_join(dx, by = c("ID", "VISCODE3"), relationship = "many-to-many") %>% 
     select(-VISCODE3) %>% 
@@ -66,6 +76,7 @@ if (which_dataset =="ADNI") {
       last_DXDDUE = data.table::last(DXDDUE, na.rm = TRUE)
     ) %>%
     ungroup() %>%
+    # Create composite outcome variables combining CDR and diagnosis
     mutate(
       CDR_DX_Imp = ifelse(
         CDR_01 == 1 &
@@ -88,6 +99,7 @@ if (which_dataset =="ADNI") {
       CDR_ONLY = ifelse(CDR>0, 1,0)
     )
   
+  # Process demographic data for age calculation
   demo <- demo0 %>% 
     select(RID,PTDOB) %>% 
     rename(ID = RID) %>%
@@ -99,6 +111,7 @@ if (which_dataset =="ADNI") {
     slice(1) %>%
     ungroup()
   
+  # Calculate ages and prepare final dataset
   CDR_DX$EXAMDATE <- as.Date(CDR_DX$EXAMDATE)
   CDR_DX_demo <- CDR_DX %>% 
     left_join(demo, by = "ID") %>% 
@@ -110,15 +123,16 @@ if (which_dataset =="ADNI") {
     mutate(CDR_DX = CDR_DX_Imp,
            age = AGE) %>% 
     filter(!is.na(CDR_DX) & CDR_DX != "")
+  
 } else if (which_dataset =="KADRC") {
-  dk0 <- read.csv(here("data_raw","<LOAD DATA>"), header = TRUE)
-  
+  # Process KADRC dataset
+  dk0 <- read.csv(here("data_raw","kadrc_data_longitudinal.csv"), header = TRUE)
   dk0$TESTDATE <- as.Date(dk0$TESTDATE, format = "%d-%b-%y")
-  
   dk <- dk0 %>% 
     filter(dx1 != "" & dx1 != ".") %>%  
     rename(EXAMDATE = TESTDATE)     
   
+  # Define AD-related diagnoses for KADRC
   dx1_AD <- c(
     "AD Dementia", "AD dem distrubed social, after", "AD dem distrubed social, with",
     "AD dem Language dysf after", "AD dem Language dysf prior", "AD dem Language dysf with",
@@ -128,6 +142,7 @@ if (which_dataset =="ADNI") {
     "AD dem w/PDI after AD dem contribut", "AD dem w/PDI after AD dem not contrib"
   )
   
+  # Create binary AD diagnosis variable
   dk <- dk %>%
     mutate(
       dx_01 = ifelse(dx1 %in% dx1_AD, "AD", "Non-AD"),
@@ -141,7 +156,8 @@ if (which_dataset =="ADNI") {
     mutate(ID = as.factor(ID)) %>%  
     arrange(ID, EXAMDATE)
   
-  m0 <- read.csv(here("data_raw","<LOAD DATA>"), header = TRUE)
+  # Load birth date information for age calculation
+  m0 <- read.csv(here("data_raw","kadrc_demographics.csv"), header = TRUE)
   mm <- m0 %>% 
     select(MAP_ID, BIRTH) %>%
     rename(ID = MAP_ID) %>%
@@ -150,6 +166,7 @@ if (which_dataset =="ADNI") {
     mutate(ID = as.factor(ID)) %>%  
     arrange(ID)
   
+  # Calculate ages for KADRC participants
   dk <- dk %>%
     left_join(mm, by = "ID") %>%
     mutate(
@@ -160,7 +177,9 @@ if (which_dataset =="ADNI") {
     select(ID, EXAMDATE, BIRTH, age, dx1, dx_01, cdr, CDR_ONLY, CDR_DX)
 }
 
+# Prepare data for interval-censored survival analysis
 if (all_or_healthy == "ALL") {
+  # Include all participants regardless of baseline cognitive status
   surv_data <- dk %>%
     group_by(ID) %>%
     arrange(EXAMDATE) %>%
@@ -174,6 +193,7 @@ if (all_or_healthy == "ALL") {
       last_age = last(age),
       event_age = if(any(event == 1, na.rm = TRUE)) age[first_event] else NA_real_,
       prev_event_age = if(any(event == 1, na.rm = TRUE)) prev_age[first_event] else NA_real_,
+      # Set up interval censoring bounds
       left = case_when(
         any(event == 1, na.rm = TRUE) && first_event == 1 ~ 0,
         any(event == 1, na.rm = TRUE) && first_event > 1 ~ prev_event_age,
@@ -193,6 +213,7 @@ if (all_or_healthy == "ALL") {
     select(ID, left, right, status) %>%
     ungroup()
 } else if (all_or_healthy == "HEALTHY") {
+  # Restrict to participants who were cognitively normal at baseline
   healthy_ids <- dk %>%
     group_by(ID) %>%
     arrange(EXAMDATE) %>%
@@ -231,8 +252,9 @@ if (all_or_healthy == "ALL") {
     select(ID, left, right, status) %>%
     ungroup()
 }
-surv_data$ID <- as.factor(surv_data$ID)
 
+# Merge survival data with biomarker onset age estimates
+surv_data$ID <- as.factor(surv_data$ID)
 df <- df0 %>%
   select(ID, est_onset_age) %>%
   group_by(ID) %>%
@@ -240,33 +262,34 @@ df <- df0 %>%
   ungroup() %>%
   mutate(ID = as.factor(ID))
 df$ID <- as.factor(df$ID)
-
 surv_data <- surv_data %>%
   left_join(df, by = "ID") %>%
   na.omit()
 
+# Set up parallel processing for bootstrap confidence intervals
 cl <- makeCluster(n_cores)
 registerDoParallel(cl)
+
+# Fit interval-censored survival model with biomarker onset age as covariate
 fit <- ic_sp(Surv(left, right, type = "interval2") ~ est_onset_age,
              data = surv_data,
              bs_samples = n_boot,
              useMCores = TRUE)
 stopCluster(cl)
-
 summary(fit)
 
+# Calculate survival curves for specific biomarker onset age quantiles
 quantiles <- c(60, 70, 80, 90)
-
 median_surv_direct <- sapply(quantiles, function(q) {
   newdata <- data.frame(est_onset_age = q)
   getFitEsts(fit, newdata = newdata)
 })
 
+# Generate survival probability estimates across age range
 time_points <- seq(50, 100, by = 0.5)
 surv_list <- lapply(1:length(quantiles), function(i) {
   newdata <- data.frame(est_onset_age = quantiles[i])
   probs <- getFitEsts(fit, newdata = newdata, q = time_points)
-  
   data.frame(
     time = time_points,
     surv = 1 - probs,
@@ -274,18 +297,18 @@ surv_list <- lapply(1:length(quantiles), function(i) {
                        levels = paste("Positivity age of", quantiles))
   )
 })
-
 surv_df <- bind_rows(surv_list)
 
+# Prepare data for plotting median survival times
 median_df <- data.frame(
   Onset_Age = paste("Positivity Age", quantiles),
   Median_Survival = median_surv_direct,
   Quantile = quantiles
 ) %>%
   mutate(Median_Survival_diff = Median_Survival - Quantile)
-
 print(median_df)
 
+# Create data for plotting median survival segments
 segment_data <- data.frame(
   x_start = median_df$Quantile,
   x_end = median_df$Median_Survival,
@@ -294,11 +317,13 @@ segment_data <- data.frame(
   onset_age = median_df$Quantile
 )
 
+# Create data for vertical reference lines
 vline_data <- data.frame(
   x_pos = quantiles,
   colors = c("red", "blue", "darkgreen", "purple")
 )
 
+# Generate survival curve plot
 p_survival <- ggplot(surv_df, aes(x = time, y = surv, color = Onset_Age)) +
   geom_step(linewidth = 1.2) +
   geom_hline(yintercept = 0.5, linetype = "dashed", color = "black", linewidth = 0.5, alpha = 0.7) +
@@ -334,6 +359,8 @@ p_survival <- ggplot(surv_df, aes(x = time, y = surv, color = Onset_Age)) +
   )
 
 print(p_survival)
+
+# Save the survival plot
 ggsave(
   filename = here("results", paste0("survival_plot_", which_dataset, "_", which_method, ".png")),
   plot = p_survival,

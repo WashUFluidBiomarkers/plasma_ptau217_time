@@ -1,5 +1,7 @@
-# Created by Kellen Petersen, July 1, 2025
+# Originally created by Kellen Petersen, July 1, 2025
+# Updated by Kellen Petersen, September 12, 2025
 
+# Load required libraries for survival analysis and visualization
 library(survival)
 library(ggplot2)
 library(survminer)
@@ -12,10 +14,11 @@ library(ggdist)
 library(patchwork)
 library(RColorBrewer)
 
-setwd("<SET WORKING DIRECTORY>")
+setwd("")
 
 conflicts_prefer(dplyr::select)
 
+# Set analysis parameters for survival modeling
 which_dataset <- "ADNI"
 which_method <- "SILA"
 symptoms_after_positivity <- FALSE
@@ -26,6 +29,7 @@ set_max_density <- 0.5
 palette_colors <- c("#1565C0", "#00B8D4", "#00B050")
 y_label_text <- "Probability of cognitively unimpaired"
 
+# Define outcome variable based on dataset
 if (which_dataset == "KADRC") {
   which_outcome <- "CDR_DX"
 } else if (which_dataset == "ADNI") {
@@ -34,33 +38,35 @@ if (which_dataset == "KADRC") {
   stop("Invalid dataset specified")
 }
 
+# Load trajectory and symptom data based on dataset and method
 if (which_dataset == "KADRC" & which_method == "TIRA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final",""))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "ADNI" & which_method == "TIRA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>")) %>% 
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final","")) %>%
     mutate(CDR_DX = CDR_DX_Imp)
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "KADRC" & which_method == "SILA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final",""))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "ADNI" & which_method == "SILA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>")) %>% 
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final","")) %>%
     mutate(CDR_DX = CDR_DX_Imp)
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else {
   stop("Invalid dataset/method specified")
 }
 
-symps <- symps %>% 
+# Create composite outcome variable combining CDR and diagnostic information
+symps <- symps %>%
   mutate(
     CDR_OUT = case_when(
       CDR_ONLY == 0 & CDR_DX == 0 ~ 0,
@@ -71,6 +77,7 @@ symps <- symps %>%
     )
   )
 
+# Prepare symptom data and calculate event times for survival analysis
 symps <- symps %>%
   filter(ID %in% df$ID, !is.na(AGE)) %>%
   mutate(ID = as.factor(ID),
@@ -81,20 +88,20 @@ symps <- symps %>%
   group_by(ID) %>%
   mutate(
     last_age = max(AGE),
+    # Define AD symptom onset age
     age_at_symptom_onset_AD = if (any(CDR_OUT == 2, na.rm = TRUE) & first(CDR_OUT == 0)) {
       first(AGE[CDR_OUT == 2 & !is.na(CDR_DX)])
     } else {
       NA
     },
     age_at_censoring_AD = ifelse(is.na(age_at_symptom_onset_AD), last_age, NA),
-    
+    # Define non-AD symptom onset age
     age_at_symptom_onset_nonAD = if (any(CDR_OUT == 1, na.rm = TRUE) & first(CDR_OUT == 0)) {
       first(AGE[CDR_OUT == 1 & !is.na(CDR_DX)])
     } else {
       NA
     },
     age_at_censoring_nonAD = ifelse(is.na(age_at_symptom_onset_nonAD), last_age, NA)
-    
   ) %>%
   ungroup() %>%
   group_by(ID) %>%
@@ -104,6 +111,7 @@ symps <- symps %>%
 n_distinct(symps$ID[!is.na(symps$age_at_symptom_onset_AD)])
 n_distinct(symps$ID[!is.na(symps$age_at_symptom_onset_nonAD)])
 
+# Prepare baseline participant data
 df$ID <- as.factor(df$ID)
 df_slice <- df %>%
   group_by(ID) %>%
@@ -113,30 +121,34 @@ df_slice <- df %>%
   ungroup() %>%
   filter(!is.na(est_onset_age))
 
+# Create survival data structure with event indicators and time-to-event calculations
 survival_data <- df_slice %>%
   left_join(
-    symps %>% select(ID, 
-                     age_at_symptom_onset_AD, age_at_censoring_AD, 
+    symps %>% select(ID,
+                     age_at_symptom_onset_AD, age_at_censoring_AD,
                      age_at_symptom_onset_nonAD, age_at_censoring_nonAD,
                      last_age,CDR_OUT),
     by = "ID"
   ) %>%
   mutate(
+    # AD events occurring after biomarker positivity
     converted_AD_pos = ((!is.na(age_at_symptom_onset_AD)) & ((age_at_symptom_onset_AD - est_onset_age>=0))),
-    time_to_event_AD_pos = ifelse(((converted_AD_pos)&(age_at_symptom_onset_AD - est_onset_age>=0)), 
-                                  age_at_symptom_onset_AD - est_onset_age, 
+    time_to_event_AD_pos = ifelse(((converted_AD_pos)&(age_at_symptom_onset_AD - est_onset_age>=0)),
+                                  age_at_symptom_onset_AD - est_onset_age,
                                   age_at_censoring_AD - est_onset_age)
   ) %>%
   mutate(
+    # AD events occurring before biomarker positivity
     converted_AD_neg = ((!is.na(age_at_symptom_onset_AD)) & ((age_at_symptom_onset_AD - est_onset_age<0))),
-    time_to_event_AD_neg = ifelse(((converted_AD_neg)&(age_at_symptom_onset_AD - est_onset_age<0)), 
-                                  age_at_symptom_onset_AD - est_onset_age, 
+    time_to_event_AD_neg = ifelse(((converted_AD_neg)&(age_at_symptom_onset_AD - est_onset_age<0)),
+                                  age_at_symptom_onset_AD - est_onset_age,
                                   age_at_censoring_AD - est_onset_age)
   ) %>%
   mutate(
+    # Non-AD dementia events
     converted_nonAD = !is.na(age_at_symptom_onset_nonAD),
-    time_to_event_nonAD = ifelse(converted_nonAD, 
-                                 age_at_symptom_onset_nonAD - est_onset_age, 
+    time_to_event_nonAD = ifelse(converted_nonAD,
+                                 age_at_symptom_onset_nonAD - est_onset_age,
                                  age_at_censoring_nonAD - est_onset_age)
   )
 
@@ -144,46 +156,57 @@ table(survival_data$converted_AD_pos)
 table(survival_data$converted_AD_neg)
 table(survival_data$converted_nonAD)
 
-ids_AD_pos <- survival_data %>% 
-  filter(converted_AD_pos) %>% 
-  arrange(time_to_event_AD_pos) %>% 
-  pull(ID)
-ids_AD_neg <- survival_data %>% 
-  filter(converted_AD_neg) %>% 
-  arrange(time_to_event_AD_neg) %>% 
-  pull(ID)
-ids_nonAD <- survival_data %>% 
-  filter(converted_nonAD) %>% 
-  arrange(time_to_event_nonAD) %>% 
+# Extract participant IDs for each event type
+ids_AD_pos <- survival_data %>%
+  filter(converted_AD_pos) %>%
+  arrange(time_to_event_AD_pos) %>%
   pull(ID)
 
+ids_AD_neg <- survival_data %>%
+  filter(converted_AD_neg) %>%
+  arrange(time_to_event_AD_neg) %>%
+  pull(ID)
+
+ids_nonAD <- survival_data %>%
+  filter(converted_nonAD) %>%
+  arrange(time_to_event_nonAD) %>%
+  pull(ID)
+
+# Prepare separate datasets for each event type
 survival_data_AD_pos <- survival_data
 survival_data_AD_neg <- survival_data
 survival_data_nonAD <- survival_data
 
+# Apply time shift for plotting convenience
 shift_x <- 100
 
 survival_data_AD_pos <- survival_data_AD_pos %>%
   mutate(time_to_event_shift = time_to_event_AD_pos + shift_x)
-km_fit_AD_pos <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ 1, 
+
+# Fit Kaplan-Meier survival curves for each event type
+km_fit_AD_pos <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ 1,
                          data = survival_data_AD_pos)
 
 survival_data_AD_neg <- survival_data_AD_neg %>%
   mutate(time_to_event_shift = time_to_event_AD_neg + shift_x)
+
 km_fit_AD_neg <- survfit(Surv(time_to_event_shift, converted_AD_neg) ~ 1,
                          data = survival_data_AD_neg)
 
 survival_data_nonAD <- survival_data_nonAD %>%
   mutate(time_to_event_shift = time_to_event_nonAD + shift_x)
+
 km_fit_nonAD <- survfit(Surv(time_to_event_shift, converted_nonAD) ~ 1,
                         data = survival_data_nonAD)
 
+# Create list of survival fits for combined plotting
 fit_list <- list(
   nonAD = km_fit_nonAD,
   AD_neg = km_fit_AD_neg,
   AD_pos = km_fit_AD_pos
 )
 
+# Set up plotting parameters
 all_times <- c(survival_data_nonAD$time_to_event_shift,
                survival_data_AD_neg$time_to_event_shift,
                survival_data_AD_pos$time_to_event_shift)
@@ -193,15 +216,17 @@ tick_breaks <- seq(
   ceiling(max(all_times, na.rm = TRUE)/5)*5,
   by = 5
 )
+
 xlim_range <- c(min(all_times, na.rm = TRUE),
                 max(all_times, na.rm = TRUE))
 
+# Create combined survival plot with three event types
 p1_three <- ggsurvplot_combine(
   fit_list,
   data = survival_data,
   palette = c("darkorange", "purple4", "red3"),
   legend.labs = c(
-    "Non-AD syndrome", 
+    "Non-AD syndrome",
     "AD syndrome/\nbiomarker negative",
     "AD syndrome/\nbiomarker positive"
   ),
@@ -222,6 +247,7 @@ p1_three <- ggsurvplot_combine(
   xlim = xlim_range
 )
 
+# Adjust x-axis labels to account for time shift
 p1_three$plot <- p1_three$plot +
   scale_x_continuous(
     breaks = tick_breaks,
@@ -229,6 +255,7 @@ p1_three$plot <- p1_three$plot +
   ) +
   theme(legend.position = "none")
 
+# Helper function to calculate median survival times
 calculate_median <- function(fit) {
   km_summary <- summary(fit)
   median_index <- which(km_summary$surv <= 0.5)[1]
@@ -244,6 +271,7 @@ med_AD_pos <- calculate_median(km_fit_AD_pos)
 med_AD_neg <- calculate_median(km_fit_AD_neg)
 med_nonAD <- calculate_median(km_fit_nonAD)
 
+# Add converter ID indicators to survival datasets
 survival_data_AD_pos <- survival_data_AD_pos %>%
   mutate(
     converter_IDs_AD_pos = ifelse(ID %in% ids_AD_pos, 1, 0),
@@ -265,26 +293,30 @@ survival_data_nonAD <- survival_data_nonAD %>%
     converter_IDs_nonAD = ifelse(ID %in% ids_nonAD, 1, 0)
   )
 
-survival_data2_AD_pos_y <- survival_data_AD_pos %>% 
-  filter(converter_IDs_AD_pos == 1) %>% 
+# Filter data for event density plotting
+survival_data2_AD_pos_y <- survival_data_AD_pos %>%
+  filter(converter_IDs_AD_pos == 1) %>%
   arrange(time_to_event_AD_pos)
 
-survival_data2_AD_neg_y <- survival_data_AD_neg %>% 
-  filter(converter_IDs_AD_neg == 1) %>% 
+survival_data2_AD_neg_y <- survival_data_AD_neg %>%
+  filter(converter_IDs_AD_neg == 1) %>%
   arrange(time_to_event_AD_neg)
 
-survival_data2_nonAD_y <- survival_data_nonAD %>% 
-  filter(converter_IDs_nonAD == 1) %>% 
+survival_data2_nonAD_y <- survival_data_nonAD %>%
+  filter(converter_IDs_nonAD == 1) %>%
   arrange(time_to_event_nonAD)
 
+# Calculate density scaling parameters
 max_density_AD_pos <- scale_max_density^2 * max(density(survival_data2_AD_pos_y$time_to_event_shift)$y)
 max_density_AD_neg <- scale_max_density^2 * max(density(survival_data2_AD_neg_y$time_to_event_shift)$y)
 max_density_nonAD <- scale_max_density^2 * max(density(survival_data2_nonAD_y$time_to_event_shift)$y)
 
+# Set uniform density scaling
 max_density_AD_pos <- set_max_density
 max_density_AD_neg <- set_max_density
 max_density_nonAD <- set_max_density
 
+# Add density plots and event markers to survival plot
 p1_three$plot <- p1_three$plot +
   geom_density(
     data = survival_data2_nonAD_y,
@@ -308,6 +340,7 @@ p1_three$plot <- p1_three$plot +
   geom_point(data = survival_data2_nonAD_y,
              aes(x = time_to_event_shift, y = -0.03), color = "darkorange", size = 1)
 
+# Add dual y-axis for density display
 p1_three$plot <- p1_three$plot +
   scale_y_continuous(
     name = y_label_text,
@@ -317,9 +350,11 @@ p1_three$plot <- p1_three$plot +
     )
   )
 
+# Add reference line at biomarker positivity
 p1_three$plot <- p1_three$plot +
-  geom_vline(xintercept = shift_x, linetype = "dashed", color = "black", linewidth = 1) 
+  geom_vline(xintercept = shift_x, linetype = "dashed", color = "black", linewidth = 1)
 
+# Apply final plot styling
 p1_three$plot <- p1_three$plot +
   scale_fill_manual(values = c("darkorange","purple4","red3")) +
   theme(
@@ -347,12 +382,14 @@ p1_three$plot <- p1_three$plot + theme(legend.key.spacing.y = unit(3, 'mm'))
 
 print(p1_three)
 
-sila_coef <- read.csv(here("results","<LOAD DATA>"))
-tira_coef <- read.csv(here("results","<LOAD DATA>"))
+# Load linear model coefficients for symptom onset prediction
+sila_coef <- read.csv(here("results",""))
+tira_coef <- read.csv(here("results",""))
 
 sila_coef$Dataset <- ifelse(sila_coef$dataset == "Knight ADRC", "KADRC", "ADNI")
 tira_coef$Dataset <- ifelse(tira_coef$dataset == "Knight ADRC", "KADRC", "ADNI")
 
+# Create coefficient data frames for both models
 sila_df <- data.frame(
   Model = "SILA",
   Dataset = sila_coef$Dataset,
@@ -367,43 +404,48 @@ tira_df <- data.frame(
   slope = tira_coef$slope
 )
 
+# Combine coefficient data
 df_linear <- rbind(
   tira_df[tira_df$Dataset == "KADRC", ],
   sila_df[sila_df$Dataset == "KADRC", ],
   tira_df[tira_df$Dataset == "ADNI", ],
   sila_df[sila_df$Dataset == "ADNI", ]
 )
+
 rownames(df_linear) <- NULL
 print(df_linear)
 
+# Extract model parameters for current dataset and method
 result_tmp <- df_linear[df_linear$Dataset == which_dataset & df_linear$Model == which_method, c("intercept", "slope")]
 model_intercept <- result_tmp$intercept
 model_slope <- result_tmp$slope
 
+# Calculate predicted symptom onset ages
 survival_data3 <- survival_data %>%
   mutate(
     predicted_symptom_onset_age = model_intercept + model_slope * est_onset_age
   )
 
-df_last_plot <- survival_data3 %>% 
+# Create survival data relative to predicted symptom onset
+df_last_plot <- survival_data3 %>%
   mutate(
     event_AD_pos = converted_AD_pos,
-    years_since_predicted_symptoms_AD_pos = ifelse(converted_AD_pos, 
-                                                   age_at_symptom_onset_AD - predicted_symptom_onset_age, 
+    years_since_predicted_symptoms_AD_pos = ifelse(converted_AD_pos,
+                                                   age_at_symptom_onset_AD - predicted_symptom_onset_age,
                                                    age_at_censoring_AD - predicted_symptom_onset_age),
-    
     event_AD_neg = converted_AD_neg,
-    years_since_predicted_symptoms_AD_neg = ifelse(converted_AD_neg, 
-                                                   age_at_symptom_onset_AD - predicted_symptom_onset_age, 
+    years_since_predicted_symptoms_AD_neg = ifelse(converted_AD_neg,
+                                                   age_at_symptom_onset_AD - predicted_symptom_onset_age,
                                                    age_at_censoring_AD - predicted_symptom_onset_age),
-    
     event_nonAD = converted_nonAD,
-    years_since_predicted_symptoms_nonAD = ifelse(converted_nonAD, 
-                                                  age_at_symptom_onset_nonAD - predicted_symptom_onset_age, 
+    years_since_predicted_symptoms_nonAD = ifelse(converted_nonAD,
+                                                  age_at_symptom_onset_nonAD - predicted_symptom_onset_age,
                                                   age_at_censoring_nonAD - predicted_symptom_onset_age)
   )
 
+# Apply time shift for symptom-based analysis
 shift_x <- 100
+
 survival_data_shift <- df_last_plot %>%
   mutate(
     years_since_predicted_symptoms_AD_pos_shift = years_since_predicted_symptoms_AD_pos + shift_x,
@@ -411,31 +453,36 @@ survival_data_shift <- df_last_plot %>%
     years_since_predicted_symptoms_nonAD_shift = years_since_predicted_symptoms_nonAD + shift_x
   )
 
+# Prepare datasets for symptom-based survival analysis
 survival_data_AD_pos <- survival_data_shift
 survival_data_AD_neg <- survival_data_shift
-survival_data_nonAD <- survival_data_shift 
+survival_data_nonAD <- survival_data_shift
 
-km_fit_AD_pos <- survfit(Surv(years_since_predicted_symptoms_AD_pos_shift, event_AD_pos) ~ 1, 
+# Fit survival models for symptom-based time scale
+km_fit_AD_pos <- survfit(Surv(years_since_predicted_symptoms_AD_pos_shift, event_AD_pos) ~ 1,
                          data = survival_data_AD_pos)
-km_fit_AD_neg <- survfit(Surv(years_since_predicted_symptoms_AD_neg_shift, event_AD_neg) ~ 1, 
+
+km_fit_AD_neg <- survfit(Surv(years_since_predicted_symptoms_AD_neg_shift, event_AD_neg) ~ 1,
                          data = survival_data_AD_neg)
-km_fit_nonAD <- survfit(Surv(years_since_predicted_symptoms_nonAD_shift, event_nonAD) ~ 1, 
+
+km_fit_nonAD <- survfit(Surv(years_since_predicted_symptoms_nonAD_shift, event_nonAD) ~ 1,
                         data = survival_data_nonAD)
 
-all_years <- c(
-  survival_data_AD_pos$years_since_predicted_symptoms_AD_pos_shift,
-  survival_data_AD_neg$years_since_predicted_symptoms_AD_neg_shift,
-  survival_data_nonAD$years_since_predicted_symptoms_nonAD_shift
-)
+# Set up plotting parameters for symptom-based analysis
+all_years <- c(survival_data_AD_pos$years_since_predicted_symptoms_AD_pos_shift,
+               survival_data_AD_neg$years_since_predicted_symptoms_AD_neg_shift,
+               survival_data_nonAD$years_since_predicted_symptoms_nonAD_shift)
+
 xlim_range <- c(min(all_years, na.rm=TRUE), max(all_years, na.rm=TRUE))
 
+# Create combined survival plot for symptom-based analysis
 km_plot <- ggsurvplot(
   list(nonAD = km_fit_nonAD, AD_neg = km_fit_AD_neg, AD_pos = km_fit_AD_pos),
   combine = TRUE,
   data = survival_data_shift,
   palette = c("darkorange", "purple4", "red3"),
   legend.labs = c(
-    "Non-AD syndrome", 
+    "Non-AD syndrome",
     "AD syndrome/\nbiomarker negative",
     "AD syndrome/\nbiomarker positive"
   ),
@@ -448,18 +495,20 @@ km_plot <- ggsurvplot(
   ggtheme = theme_cowplot()
 )
 
-survival_data2_AD_pos_y <- survival_data_AD_pos %>% 
-  filter(event_AD_pos == 1) %>% 
+# Prepare event data for density overlays
+survival_data2_AD_pos_y <- survival_data_AD_pos %>%
+  filter(event_AD_pos == 1) %>%
   arrange(years_since_predicted_symptoms_AD_pos_shift)
 
-survival_data2_AD_neg_y <- survival_data_AD_neg %>% 
-  filter(event_AD_neg == 1) %>% 
+survival_data2_AD_neg_y <- survival_data_AD_neg %>%
+  filter(event_AD_neg == 1) %>%
   arrange(years_since_predicted_symptoms_AD_neg_shift)
 
-survival_data2_nonAD_y <- survival_data_nonAD %>% 
-  filter(event_nonAD == 1) %>% 
+survival_data2_nonAD_y <- survival_data_nonAD %>%
+  filter(event_nonAD == 1) %>%
   arrange(years_since_predicted_symptoms_nonAD_shift)
 
+# Set up axis parameters for symptom-based plots
 xlim_lower_limit <- floor(min(all_times, na.rm = TRUE)/5)*5
 xlim_upper_limit <- ceiling(max(all_times, na.rm = TRUE)/5)*5
 
@@ -475,9 +524,11 @@ km_main_plot <- km_plot$plot +
     labels = seq(xlim_lower_limit, xlim_upper_limit, 5) - shift_x
   )
 
+# Calculate density scaling for symptom-based plots
 max_density_AD_pos2 <- scale_max_density^2 * max(density(survival_data2_AD_pos_y$years_since_predicted_symptoms_AD_pos_shift)$y)
 max_density_AD_neg2 <- scale_max_density^2 * max(density(survival_data2_AD_neg_y$years_since_predicted_symptoms_AD_neg_shift)$y)
 max_density_nonAD2 <- scale_max_density^2 * max(density(survival_data2_nonAD_y$years_since_predicted_symptoms_nonAD_shift)$y)
+
 max_density2 <- max(c(max_density_AD_pos2, max_density_AD_neg2, max_density_nonAD2))
 
 set_max_density2 <- 1.2
@@ -486,6 +537,7 @@ max_density_AD_pos2 <- set_max_density2
 max_density_AD_neg2 <- set_max_density2
 max_density_nonAD2 <- set_max_density2
 
+# Add density overlays to symptom-based survival plot
 km_main_plot <- km_main_plot +
   geom_density(
     data = survival_data2_nonAD_y,
@@ -503,6 +555,7 @@ km_main_plot <- km_main_plot +
     color = "red3", fill = "#FF9999", alpha = 0.7
   )
 
+# Add dual y-axis for symptom-based plot
 km_main_plot <- km_main_plot +
   scale_y_continuous(
     name = y_label_text,
@@ -510,20 +563,23 @@ km_main_plot <- km_main_plot +
     limits = c(-0.03, 1)
   )
 
+# Add event markers to symptom-based plot
 km_main_plot <- km_main_plot +
   geom_point(data = survival_data2_AD_pos_y,
-             aes(x = years_since_predicted_symptoms_AD_pos_shift, y = -0.01), 
+             aes(x = years_since_predicted_symptoms_AD_pos_shift, y = -0.01),
              color = "red3", size = 1) +
   geom_point(data = survival_data2_AD_neg_y,
-             aes(x = years_since_predicted_symptoms_AD_neg_shift, y = -0.02), 
+             aes(x = years_since_predicted_symptoms_AD_neg_shift, y = -0.02),
              color = "purple4", size = 1) +
   geom_point(data = survival_data2_nonAD_y,
-             aes(x = years_since_predicted_symptoms_nonAD_shift, y = -0.03), 
+             aes(x = years_since_predicted_symptoms_nonAD_shift, y = -0.03),
              color = "darkorange", size = 1)
 
+# Add reference line for symptom onset
 km_main_plot <- km_main_plot +
   geom_vline(xintercept = shift_x, linetype = "dashed", color = "black", linewidth = 1)
 
+# Apply styling to symptom-based plot
 km_main_plot <- km_main_plot +
   theme(
     legend.title = element_blank(),
@@ -539,6 +595,7 @@ km_main_plot <- km_main_plot +
     fill = guide_legend(reverse = TRUE)
   )
 
+# Create age-stratified survival analysis
 survival_data <- survival_data %>%
   mutate(
     age_bin = case_when(
@@ -550,12 +607,14 @@ survival_data <- survival_data %>%
     age_bin = factor(age_bin, levels = c("< 70", "70-80", "≥ 80"))
   )
 
+# Fit survival model stratified by age groups
 survival_data_AD_pos_bin <- survival_data %>%
   mutate(time_to_event_shift = time_to_event_AD_pos + shift_x)
 
-km_fit_by_bin <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ age_bin, 
+km_fit_by_bin <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ age_bin,
                          data = survival_data_AD_pos_bin)
 
+# Create age-stratified survival plot
 p_age_bins <- ggsurvplot(
   km_fit_by_bin,
   data = survival_data_AD_pos_bin,
@@ -570,6 +629,7 @@ p_age_bins <- ggsurvplot(
   xlim = c(100,130)
 )
 
+# Apply styling to age-stratified plot
 p_age_bins$plot <- p_age_bins$plot +
   scale_x_continuous(
     breaks = tick_breaks,
@@ -594,6 +654,7 @@ p_age_bins$plot <- p_age_bins$plot +
 
 print(p_age_bins)
 
+# Create age-stratified analysis for symptom-based time scale
 survival_data_AD_pos <- survival_data_shift %>%
   mutate(
     age_bin = case_when(
@@ -605,7 +666,8 @@ survival_data_AD_pos <- survival_data_shift %>%
     age_bin = factor(age_bin, levels = c("< 70", "70-80", "≥ 80"))
   )
 
-km_fit_AD_pos_bins <- survfit(Surv(years_since_predicted_symptoms_AD_pos_shift, converted_AD_pos) ~ age_bin, 
+# Fit age-stratified survival model for symptom-based analysis
+km_fit_AD_pos_bins <- survfit(Surv(years_since_predicted_symptoms_AD_pos_shift, converted_AD_pos) ~ age_bin,
                               data = survival_data_AD_pos)
 
 fit_list_binned <- list(
@@ -614,8 +676,10 @@ fit_list_binned <- list(
   "AD_pos ≥ 80" = km_fit_AD_pos_bins[3]
 )
 
+# Create color palette for age groups
 greens <- brewer.pal(3, "Greens")
 
+# Create age-stratified symptom-based survival plot
 km_main_binned <- ggsurvplot(
   fit_list_binned,
   combine = TRUE,
@@ -631,6 +695,7 @@ km_main_binned <- ggsurvplot(
   legend.labs = c("< 70", "70-80", "≥ 80"),
 )
 
+# Apply styling to age-stratified symptom-based plot
 km_main_binned$plot <- km_main_binned$plot +
   scale_x_continuous(
     breaks = seq(xlim_lower_limit, xlim_upper_limit, 5),
@@ -655,6 +720,7 @@ km_main_binned$plot <- km_main_binned$plot +
 
 print(km_main_binned)
 
+# Repeat data loading for baseline analysis
 if (which_dataset == "KADRC") {
   which_outcome <- "CDR_DX"
 } else if (which_dataset == "ADNI") {
@@ -664,32 +730,33 @@ if (which_dataset == "KADRC") {
 }
 
 if (which_dataset == "KADRC" & which_method == "TIRA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final",""))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "ADNI" & which_method == "TIRA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>")) %>% 
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final","")) %>%
     mutate(CDR_DX = CDR_DX_Imp)
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "KADRC" & which_method == "SILA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final",""))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else if (which_dataset == "ADNI" & which_method == "SILA") {
-  df <- read.csv(here::here("results","<LOAD DATA>"))
-  symps <- read.csv(here::here("data_final","<LOAD DATA>")) %>% 
+  df <- read.csv(here::here("results",""))
+  symps <- read.csv(here::here("data_final","")) %>%
     mutate(CDR_DX = CDR_DX_Imp)
-  ids <- read.csv(here::here("data_final","<LOAD DATA>"))
-  ids_sens <- read.csv(here::here("data_final","<LOAD DATA>"))
+  ids <- read.csv(here::here("data_final",""))
+  ids_sens <- read.csv(here::here("data_final",""))
 } else {
   stop("Invalid dataset/method specified")
 }
 
-symps <- symps %>% 
+# Process symptom data for baseline analysis
+symps <- symps %>%
   mutate(
     CDR_OUT = case_when(
       CDR_ONLY == 0 & CDR_DX == 0 ~ 0,
@@ -716,14 +783,12 @@ symps <- symps %>%
       NA
     },
     age_at_censoring_AD = ifelse(is.na(age_at_symptom_onset_AD), last_age, NA),
-    
     age_at_symptom_onset_nonAD = if (any(CDR_OUT == 1, na.rm = TRUE) & first(CDR_OUT == 0)) {
       first(AGE[CDR_OUT == 1 & !is.na(CDR_DX)])
     } else {
       NA
     },
     age_at_censoring_nonAD = ifelse(is.na(age_at_symptom_onset_nonAD), last_age, NA)
-    
   ) %>%
   ungroup() %>%
   group_by(ID) %>%
@@ -734,6 +799,8 @@ n_distinct(symps$ID[!is.na(symps$age_at_symptom_onset_AD)])
 n_distinct(symps$ID[!is.na(symps$age_at_symptom_onset_nonAD)])
 
 df$ID <- as.factor(df$ID)
+
+# Prepare baseline analysis data with plasma values
 df_slice <- df %>%
   group_by(ID) %>%
   slice(1) %>%
@@ -742,56 +809,64 @@ df_slice <- df %>%
   ungroup() %>%
   filter(!is.na(est_onset_age))
 
+# Create survival data for baseline analysis
 survival_data <- df_slice %>%
   left_join(
-    symps %>% select(ID, 
-                     age_at_symptom_onset_AD, age_at_censoring_AD, 
+    symps %>% select(ID,
+                     age_at_symptom_onset_AD, age_at_censoring_AD,
                      age_at_symptom_onset_nonAD, age_at_censoring_nonAD,
                      last_age,CDR_OUT),
     by = "ID"
   ) %>%
   mutate(
     converted_AD_pos = ((!is.na(age_at_symptom_onset_AD)) & ((age_at_symptom_onset_AD - est_onset_age>=0))),
-    time_to_event_AD_pos = ifelse(((converted_AD_pos)&(age_at_symptom_onset_AD - est_onset_age>=0)), 
-                                  age_at_symptom_onset_AD - first_plasma_age, 
+    time_to_event_AD_pos = ifelse(((converted_AD_pos)&(age_at_symptom_onset_AD - est_onset_age>=0)),
+                                  age_at_symptom_onset_AD - first_plasma_age,
                                   age_at_censoring_AD - first_plasma_age)
   ) %>%
   mutate(
     converted_AD_neg = ((!is.na(age_at_symptom_onset_AD)) & ((age_at_symptom_onset_AD - est_onset_age<0))),
-    time_to_event_AD_neg = ifelse(((converted_AD_neg)&(age_at_symptom_onset_AD - est_onset_age<0)), 
-                                  age_at_symptom_onset_AD - first_plasma_age, 
+    time_to_event_AD_neg = ifelse(((converted_AD_neg)&(age_at_symptom_onset_AD - est_onset_age<0)),
+                                  age_at_symptom_onset_AD - first_plasma_age,
                                   age_at_censoring_AD - first_plasma_age)
   ) %>%
   mutate(
     converted_nonAD = !is.na(age_at_symptom_onset_nonAD),
-    time_to_event_nonAD = ifelse(converted_nonAD, 
-                                 age_at_symptom_onset_nonAD - first_plasma_age, 
+    time_to_event_nonAD = ifelse(converted_nonAD,
+                                 age_at_symptom_onset_nonAD - first_plasma_age,
                                  age_at_censoring_nonAD - first_plasma_age)
   )
 
-survival_data <- survival_data %>% 
+# Calculate difference between symptom onset and biomarker positivity
+survival_data <- survival_data %>%
   mutate(diff = age_at_symptom_onset_AD - est_onset_age)
 
+# Apply biomarker positivity filter for baseline analysis
 filter_bl_CDRge0 <- TRUE
 survival_data0 <- survival_data
+
 if (filter_bl_CDRge0) {
   survival_data <- survival_data0 %>%
     filter(plasma >= 4.06)
 }
 
-ids_AD_pos <- survival_data %>% 
-  filter(converted_AD_pos) %>% 
-  arrange(time_to_event_AD_pos) %>% 
-  pull(ID)
-ids_AD_neg <- survival_data %>% 
-  filter(converted_AD_neg) %>% 
-  arrange(time_to_event_AD_neg) %>% 
-  pull(ID)
-ids_nonAD <- survival_data %>% 
-  filter(converted_nonAD) %>% 
-  arrange(time_to_event_nonAD) %>% 
+# Extract event IDs for baseline analysis
+ids_AD_pos <- survival_data %>%
+  filter(converted_AD_pos) %>%
+  arrange(time_to_event_AD_pos) %>%
   pull(ID)
 
+ids_AD_neg <- survival_data %>%
+  filter(converted_AD_neg) %>%
+  arrange(time_to_event_AD_neg) %>%
+  pull(ID)
+
+ids_nonAD <- survival_data %>%
+  filter(converted_nonAD) %>%
+  arrange(time_to_event_nonAD) %>%
+  pull(ID)
+
+# Prepare datasets for baseline survival analysis
 survival_data_AD_pos <- survival_data
 survival_data_AD_neg <- survival_data
 survival_data_nonAD <- survival_data
@@ -800,7 +875,9 @@ shift_x <- 100
 
 survival_data_AD_pos <- survival_data_AD_pos %>%
   mutate(time_to_event_shift = time_to_event_AD_pos + shift_x)
-km_fit_AD_pos <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ 1, 
+
+# Fit baseline survival models
+km_fit_AD_pos <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ 1,
                          data = survival_data_AD_pos)
 
 survival_data_AD_neg <- survival_data_AD_neg %>%
@@ -808,14 +885,17 @@ survival_data_AD_neg <- survival_data_AD_neg %>%
 
 survival_data_nonAD <- survival_data_nonAD %>%
   mutate(time_to_event_shift = time_to_event_nonAD + shift_x)
+
 km_fit_nonAD <- survfit(Surv(time_to_event_shift, converted_nonAD) ~ 1,
                         data = survival_data_nonAD)
 
+# Create baseline survival analysis fit list
 fit_list <- list(
   nonAD = km_fit_nonAD,
   AD_pos = km_fit_AD_pos
 )
 
+# Set up parameters for baseline analysis plotting
 all_times <- c(survival_data_nonAD$time_to_event_shift,
                survival_data_AD_pos$time_to_event_shift)
 
@@ -824,9 +904,11 @@ tick_breaks <- seq(
   ceiling(max(all_times, na.rm = TRUE)/5)*5,
   by = 5
 )
+
 xlim_range <- c(min(all_times, na.rm = TRUE),
                 max(all_times, na.rm = TRUE))
 
+# Create baseline survival plot
 p1_baseline <- ggsurvplot_combine(
   fit_list,
   data = survival_data,
@@ -843,6 +925,7 @@ p1_baseline <- ggsurvplot_combine(
   xlim = xlim_range
 )
 
+# Apply styling to baseline plot
 p1_baseline$plot <- p1_baseline$plot +
   scale_x_continuous(
     breaks = tick_breaks,
@@ -850,6 +933,7 @@ p1_baseline$plot <- p1_baseline$plot +
   ) +
   theme(legend.position = "none")
 
+# Define median calculation function for baseline analysis
 calculate_median <- function(fit) {
   km_summary <- summary(fit)
   median_index <- which(km_summary$surv <= 0.5)[1]
@@ -861,9 +945,11 @@ calculate_median <- function(fit) {
   )
 }
 
+# Calculate median survival times for baseline analysis
 med_AD_pos <- calculate_median(km_fit_AD_pos)
 med_nonAD <- calculate_median(km_fit_nonAD)
 
+# Add converter indicators to baseline survival datasets
 survival_data_AD_pos <- survival_data_AD_pos %>%
   mutate(
     converter_IDs_AD_pos = ifelse(ID %in% ids_AD_pos, 1, 0),
@@ -882,20 +968,24 @@ survival_data_nonAD <- survival_data_nonAD %>%
     converter_IDs_nonAD = ifelse(ID %in% ids_nonAD, 1, 0)
   )
 
-survival_data2_AD_pos_y <- survival_data_AD_pos %>% 
-  filter(converter_IDs_AD_pos == 1) %>% 
+# Filter event data for baseline density plots
+survival_data2_AD_pos_y <- survival_data_AD_pos %>%
+  filter(converter_IDs_AD_pos == 1) %>%
   arrange(time_to_event_AD_pos)
 
-survival_data2_nonAD_y <- survival_data_nonAD %>% 
-  filter(converter_IDs_nonAD == 1) %>% 
+survival_data2_nonAD_y <- survival_data_nonAD %>%
+  filter(converter_IDs_nonAD == 1) %>%
   arrange(time_to_event_nonAD)
 
+# Calculate density scaling for baseline plots
 max_density_AD_pos <- scale_max_density^2 * max(density(survival_data2_AD_pos_y$time_to_event_shift)$y)
 max_density_nonAD <- scale_max_density^2 * max(density(survival_data2_nonAD_y$time_to_event_shift)$y)
 
+# Apply uniform density scaling for baseline plots
 max_density_AD_pos <- set_max_density
 max_density_AD_neg <- set_max_density
 
+# Add density overlays and event markers to baseline plot
 p1_baseline$plot <- p1_baseline$plot +
   geom_density(
     data = survival_data2_nonAD_y,
@@ -912,6 +1002,7 @@ p1_baseline$plot <- p1_baseline$plot +
   geom_point(data = survival_data2_nonAD_y,
              aes(x = time_to_event_shift, y = -0.03), color = "darkorange", size = 1)
 
+# Add dual y-axis for baseline plot
 p1_baseline$plot <- p1_baseline$plot +
   scale_y_continuous(
     name = y_label_text,
@@ -921,9 +1012,11 @@ p1_baseline$plot <- p1_baseline$plot +
     )
   )
 
+# Add reference line for baseline collection time
 p1_baseline$plot <- p1_baseline$plot +
-  geom_vline(xintercept = shift_x, linetype = "dashed", color = "black", linewidth = 1) 
+  geom_vline(xintercept = shift_x, linetype = "dashed", color = "black", linewidth = 1)
 
+# Apply styling to baseline plot
 p1_baseline$plot <- p1_baseline$plot +
   scale_fill_manual(values = c("darkorange","red3")) +
   theme(
@@ -931,7 +1024,8 @@ p1_baseline$plot <- p1_baseline$plot +
     legend.position = "none"
   )
 
-p1_baseline <- p1_baseline$plot 
+# Convert to plot object and add legend styling
+p1_baseline <- p1_baseline$plot
 
 p1_baseline <- p1_baseline +
   theme(
@@ -950,6 +1044,7 @@ p1_baseline <- p1_baseline +
 
 print(p1_baseline)
 
+# Create age-stratified analysis for baseline time scale
 survival_data <- survival_data %>%
   mutate(
     age_bin = case_when(
@@ -961,12 +1056,14 @@ survival_data <- survival_data %>%
     age_bin = factor(age_bin, levels = c("< 70", "70-80", "≥ 80"))
   )
 
+# Fit age-stratified survival model for baseline analysis
 survival_data_AD_pos_bin <- survival_data %>%
   mutate(time_to_event_shift = time_to_event_AD_pos + shift_x)
 
-km_fit_by_bin <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ age_bin, 
+km_fit_by_bin <- survfit(Surv(time_to_event_shift, converted_AD_pos) ~ age_bin,
                          data = survival_data_AD_pos_bin)
 
+# Create age-stratified baseline survival plot
 p_age_bins_baseline <- ggsurvplot(
   km_fit_by_bin,
   data = survival_data_AD_pos_bin,
@@ -981,6 +1078,7 @@ p_age_bins_baseline <- ggsurvplot(
   xlim = xlim_range
 )
 
+# Apply styling to age-stratified baseline plot
 p_age_bins_baseline$plot <- p_age_bins_baseline$plot +
   scale_x_continuous(
     breaks = tick_breaks,
@@ -998,6 +1096,7 @@ p_age_bins_baseline$plot <- p_age_bins_baseline$plot +
 
 print(p_age_bins_baseline)
 
+# Apply final styling adjustments to age-stratified biomarker plot
 p_age_bins$plot <- p_age_bins$plot +
   scale_x_continuous(
     breaks = tick_breaks,
@@ -1013,20 +1112,26 @@ p_age_bins$plot <- p_age_bins$plot +
     legend.box.background = element_rect(color = "white")
   )
 
+# Combine all plots into comprehensive survival figure
 pp <- (p1_baseline + p1_three$plot + km_main_plot) / (p_age_bins_baseline$plot + p_age_bins$plot + km_main_binned$plot)
+
+# Add panel labels and styling
 pp <- pp +
-  plot_annotation(tag_levels = 'A') & 
+  plot_annotation(tag_levels = 'A') &
   theme(plot.tag = element_text(face = "bold")) +
   theme(plot.tag.position = c(0, 1), plot.tag = element_text(hjust = 0, vjust = 1))
 
+# Generate filename and save comprehensive survival analysis figure
 filename0 <- str_c("results/figure_KM_",
                    which_method, "_",
-                   which_dataset, "_", 
+                   which_dataset, "_",
                    format(Sys.Date(), "%Y-%m-%d"), "_",
                    format(Sys.time(), "%H-%M-%S"))
+
 ggsave(
   filename = str_c(filename0,".png"),
   plot = pp,
   width = 20, height = 12, units = "in",
-  dpi = 500
+  dpi = 500,
+  bg = "white"
 )

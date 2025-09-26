@@ -1,5 +1,7 @@
-# Created by Kellen Petersen, July 1, 2025
+# Originally created by Kellen Petersen, July 1, 2025
+# Updated by Kellen Petersen, September 12, 2025
 
+# Load required libraries for AT staging analysis and visualization
 library(tidyverse)
 library(ggdist)
 library(cowplot)
@@ -9,15 +11,16 @@ library(rstatix)
 library(conflicted)
 library(patchwork)
 
-setwd("<SET WORKING DIRECTORY>")
-
+setwd("")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("first", "dplyr")
 
-df_long_tira_0 <- read.csv(here("results","<LOAD DATA>"))
-df_long_sila_0 <- read.csv(here("results","<LOAD DATA>"))
+# Load TIRA and SILA model results for comparison
+df_long_tira_0 <- read.csv(here("results",""))
+df_long_sila_0 <- read.csv(here("results",""))
 
-df_long_tira <- df_long_tira_0 %>% 
+# Prepare TIRA dataset with renamed variables
+df_long_tira <- df_long_tira_0 %>%
   dplyr::select(ID, plasma, AGE,
                 est_onset_age, years_since_onset,
                 years_since_predicted_symptoms) %>%
@@ -29,8 +32,9 @@ df_long_tira <- df_long_tira_0 %>%
   slice(1) %>%
   ungroup()
 
-df_long_sila <- df_long_sila_0 %>% 
-  dplyr::select(ID, plasma, AGE, 
+# Prepare SILA dataset with renamed variables
+df_long_sila <- df_long_sila_0 %>%
+  dplyr::select(ID, plasma, AGE,
                 est_onset_age, years_since_onset,
                 years_since_predicted_symptoms) %>%
   rename(plasma_SILA = plasma) %>%
@@ -41,20 +45,21 @@ df_long_sila <- df_long_sila_0 %>%
   slice(1) %>%
   ungroup()
 
+# Combine TIRA and SILA results
 df_long <- df_long_tira %>%
-  left_join(df_long_sila, by = "ID") %>% 
-  dplyr::select(-AGE.y) %>% 
+  left_join(df_long_sila, by = "ID") %>%
+  dplyr::select(-AGE.y) %>%
   rename(AGE=AGE.x)
 
-df0 <- read.csv(here("data_raw","<LOAD DATA>"))
-
+# Load raw biomarker data for AT staging
+df0 <- read.csv(here("data_raw",""))
 df <- df0 %>%
   dplyr::select(RID, EXAMDATE,
                 C2N_plasma_ptau217_ratio,
                 CENTILOIDS, CENTILOIDS_10,
                 MesialTemporal, TAU_MesialTemporal_10,
                 TemporoParietal, TAU_TemporoParietal_10) %>%
-  rename(ID = RID) 
+  rename(ID = RID)
 
 df <- df %>%
   filter(!is.na(C2N_plasma_ptau217_ratio))
@@ -62,6 +67,7 @@ df <- df %>%
 df$ID <- as.factor(df$ID)
 df$EXAMDATE <- as.Date(df$EXAMDATE, format = "%Y-%m-%d")
 
+# Define AT staging categories based on amyloid and tau biomarkers
 df <- df %>%
   mutate(
     AT_stage = case_when(
@@ -75,21 +81,23 @@ df <- df %>%
 
 df_stages <- df
 
+# Function to create standardized dataframes for each model
 create_dataframe <- function(which_model, df = df_stages) {
   if (which_model == "tira") {
     model <- "TIRA"
     dataset <- "ADNI"
-    clock <- read.csv(here("results","<LOAD DATA>"))
-    df <- read.csv(here("data_raw","<LOAD DATA>"))
+    clock <- read.csv(here("results",""))
+    df <- read.csv(here("data_raw",""))
   } else if (which_model == "sila") {
     model <- "SILA"
     dataset <- "ADNI"
-    clock <- read.csv(here("results_SILA","<LOAD DATA>")) %>%
+    clock <- read.csv(here("results_SILA","")) %>%
       mutate(clock_time = adtime)
-    df <- read.csv(here("data_raw","<LOAD DATA>"))
+    df <- read.csv(here("data_raw",""))
   }
   
-  df  <- df %>%
+  # Standardize variable names and formats
+  df <- df %>%
     rename(ID = RID,
            plasma = C2N_plasma_ptau217_ratio) %>%
     mutate(ID = as.factor(ID),
@@ -97,18 +105,23 @@ create_dataframe <- function(which_model, df = df_stages) {
            AGE = as.numeric(AGE),
            plasma = as.numeric(plasma))
   
+  # Map plasma values to clock time using nearest neighbor approach
   clock_plasma_min <- min(clock$plasma)
   clock_plasma_max <- max(clock$plasma)
+  
   df$plasma_time <- sapply(df$plasma, function(x) {
     if (is.na(x)) return(NA)
     if (x < clock_plasma_min || x > clock_plasma_max) {
       return(NA)
     }
+    
     idx <- which.min(abs(clock$plasma - x))
     clock$clock_time[idx]
   })
+  
   df$plasma_time <- as.numeric(df$plasma_time)
   
+  # Calculate time variables and onset age estimates
   df <- df %>%
     arrange(ID, EXAMDATE) %>%
     group_by(ID) %>%
@@ -127,12 +140,15 @@ create_dataframe <- function(which_model, df = df_stages) {
     ungroup() %>%
     arrange(ID, EXAMDATE)
   
+  # Select key variables for analysis
   df2 <- df %>%
     dplyr::select(ID, EXAMDATE, AGE,
                   plasma_time, est_onset_age_i, est_onset_age, years_since_onset)
+  
   df2$ID <- as.factor(df2$ID)
   df2$EXAMDATE <- as.Date(df2$EXAMDATE, format = "%Y-%m-%d")
   
+  # Merge with AT staging data
   DF <- df_stages %>%
     left_join(df2, by = c("ID" = "ID", "EXAMDATE" = "EXAMDATE")) %>%
     mutate(
@@ -153,9 +169,11 @@ create_dataframe <- function(which_model, df = df_stages) {
   return(DF)
 }
 
+# Create datasets for both models
 DF_tira <- create_dataframe("tira")
 DF_sila <- create_dataframe("sila")
 
+# Define color scheme for AT stages
 at_stage_colors <- c(
   "A-T_early-T_late-" = "#B0B0B0",
   "A+T_early-T_late-" = "#4682B4",
@@ -163,12 +181,14 @@ at_stage_colors <- c(
   "A+T_early+T_late+" = "#006400"
 )
 
-sila_coef <- read.csv(here("results","<LOAD DATA>"))
-tira_coef <- read.csv(here("results","<LOAD DATA>"))
+# Load linear model coefficients for symptom prediction
+sila_coef <- read.csv(here("results",""))
+tira_coef <- read.csv(here("results",""))
 
 sila_coef$Dataset <- ifelse(sila_coef$dataset == "Knight ADRC", "KADRC", "ADNI")
 tira_coef$Dataset <- ifelse(tira_coef$dataset == "Knight ADRC", "KADRC", "ADNI")
 
+# Organize coefficients by model and dataset
 sila_df <- data.frame(
   Model = "SILA",
   Dataset = sila_coef$Dataset,
@@ -189,41 +209,47 @@ df_linear <- rbind(
   tira_df[tira_df$Dataset == "ADNI", ],
   sila_df[sila_df$Dataset == "ADNI", ]
 )
+
 rownames(df_linear) <- NULL
 print(df_linear)
 
+# Calculate predicted symptom onset for TIRA model
 which_dataset <- "ADNI"
 which_method <- "TIRA"
 result_tmp <- df_linear[df_linear$Dataset == which_dataset & df_linear$Model == which_method, c("intercept", "slope")]
 model_intercept <- result_tmp$intercept
 model_slope <- result_tmp$slope
-DF_tira <- DF_tira %>% 
-  mutate(est_symtoms_age = est_onset_age*model_slope + model_intercept) %>% 
+
+DF_tira <- DF_tira %>%
+  mutate(est_symtoms_age = est_onset_age*model_slope + model_intercept) %>%
   mutate(years_since_symptoms = AGE - est_symtoms_age)
 
+# Calculate predicted symptom onset for SILA model
 which_dataset <- "ADNI"
 which_method <- "SILA"
 result_tmp <- df_linear[df_linear$Dataset == which_dataset & df_linear$Model == which_method, c("intercept", "slope")]
 model_intercept <- result_tmp$intercept
 model_slope <- result_tmp$slope
-DF_sila <- DF_sila %>% 
-  mutate(est_symtoms_age = est_onset_age*model_slope + model_intercept) %>% 
+
+DF_sila <- DF_sila %>%
+  mutate(est_symtoms_age = est_onset_age*model_slope + model_intercept) %>%
   mutate(years_since_symptoms = AGE - est_symtoms_age)
 
+# Filter datasets for analysis
 DF_tira_2 <- DF_tira %>% filter(!is.na(AT_stage), !is.na(years_since_onset))
 DF_sila_2 <- DF_sila %>% filter(!is.na(AT_stage), !is.na(years_since_onset))
-
 DF_tira_p <- DF_tira %>% filter(!is.na(AT_stage), !is.na(C2N_plasma_ptau217_ratio))
 DF_sila_p <- DF_tira %>% filter(!is.na(AT_stage), !is.na(C2N_plasma_ptau217_ratio))
 
+# Display sample sizes for each AT stage
 table(DF_tira$AT_stage)
 table(DF_tira_2$AT_stage)
 table(DF_tira_p$AT_stage)
-
 table(DF_sila$AT_stage)
 table(DF_sila_2$AT_stage)
 table(DF_sila_p$AT_stage)
 
+# Function to create raincloud plots with statistical comparisons
 makeATStageRaincloud_0 <- function(data,
                                    value_var,
                                    y_label = "Years since %p-tau217 positivity",
@@ -231,6 +257,7 @@ makeATStageRaincloud_0 <- function(data,
                                    normalization = "none",
                                    group_var = AT_stage,
                                    show_n = TRUE) {
+  
   value_var <- ensym(value_var)
   group_var <- ensym(group_var)
   
@@ -245,6 +272,7 @@ makeATStageRaincloud_0 <- function(data,
                "A+T_early+T_late+")
   )
   
+  # Calculate sample sizes for labels
   n_counts <- df_plot %>%
     group_by(AT_stage) %>%
     summarise(n = n()) %>%
@@ -266,6 +294,7 @@ makeATStageRaincloud_0 <- function(data,
     )
   }
   
+  # Create raincloud plot with distribution components
   plot <- ggplot(df_plot, aes(x = !!group_var, y = !!value_var, fill = !!group_var)) +
     ggdist::geom_dots(
       side = "bottom",
@@ -296,6 +325,7 @@ makeATStageRaincloud_0 <- function(data,
       axis.title = element_text(size = 14),
       axis.text = element_text(size = 12)
     ) +
+    # Add statistical comparisons between groups
     ggpubr::stat_compare_means(
       comparisons = list(
         c("A-T_early-T_late-", "A+T_early-T_late-"),
@@ -321,6 +351,7 @@ makeATStageRaincloud_0 <- function(data,
   return(plot)
 }
 
+# Alternative raincloud function with Kruskal-Wallis testing
 makeATStageRaincloud_1 <- function(data,
                                    value_var,
                                    y_label = "Years since %p-tau217 positivity",
@@ -328,6 +359,7 @@ makeATStageRaincloud_1 <- function(data,
                                    normalization = "none",
                                    group_var = AT_stage,
                                    show_n = TRUE) {
+  
   value_var <- ensym(value_var)
   group_var <- ensym(group_var)
   
@@ -363,6 +395,7 @@ makeATStageRaincloud_1 <- function(data,
     )
   }
   
+  # Perform Kruskal-Wallis test for overall group differences
   kw_test <- df_plot %>%
     kruskal_test(as.formula(paste(quo_name(value_var), "~", quo_name(group_var))))
   
@@ -397,6 +430,7 @@ makeATStageRaincloud_1 <- function(data,
       axis.text = element_text(size = 12)
     )
   
+  # Add post-hoc tests if overall test is significant
   if (kw_test$p < 0.05) {
     dunn_test_results <- df_plot %>%
       dunn_test(as.formula(paste(quo_name(value_var), "~", quo_name(group_var))),
@@ -423,41 +457,45 @@ makeATStageRaincloud_1 <- function(data,
   return(plot)
 }
 
+# Set the raincloud function to use
 makeATStageRaincloud <- makeATStageRaincloud_0
 
-DF_tira_plot <- DF_tira %>% 
-  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>% 
-  dplyr::filter(!is.na(CENTILOIDS)) %>% 
-  dplyr::filter(!is.na(MesialTemporal)) %>% 
+# Filter data for plotting (remove extreme values and missing data)
+DF_tira_plot <- DF_tira %>%
+  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>%
+  dplyr::filter(!is.na(CENTILOIDS)) %>%
+  dplyr::filter(!is.na(MesialTemporal)) %>%
   dplyr::filter(!is.na(TemporoParietal))
 
-DF_sila_plot <- DF_sila %>% 
-  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>% 
-  dplyr::filter(!is.na(CENTILOIDS_10)) %>% 
-  dplyr::filter(!is.na(MesialTemporal)) %>% 
+DF_sila_plot <- DF_sila %>%
+  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>%
+  dplyr::filter(!is.na(CENTILOIDS_10)) %>%
+  dplyr::filter(!is.na(MesialTemporal)) %>%
   dplyr::filter(!is.na(TemporoParietal))
 
-DF_plasma_plot <- DF_tira %>% 
-  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>% 
-  dplyr::filter(!is.na(CENTILOIDS_10)) %>% 
-  dplyr::filter(!is.na(MesialTemporal)) %>% 
+DF_plasma_plot <- DF_tira %>%
+  dplyr::filter((C2N_plasma_ptau217_ratio>1.06) & (C2N_plasma_ptau217_ratio<10.45)) %>%
+  dplyr::filter(!is.na(CENTILOIDS_10)) %>%
+  dplyr::filter(!is.na(MesialTemporal)) %>%
   dplyr::filter(!is.na(TemporoParietal))
 
-DF_tira_plot2 <- DF_tira_plot %>% 
-  group_by(ID) %>% 
-  slice(n()) %>% 
+# Take latest observation per participant
+DF_tira_plot2 <- DF_tira_plot %>%
+  group_by(ID) %>%
+  slice(n()) %>%
   ungroup()
 
 DF_sila_plot2 <- DF_sila_plot %>%
-  group_by(ID) %>% 
-  slice(n()) %>% 
+  group_by(ID) %>%
+  slice(n()) %>%
   ungroup()
 
 DF_plasma_plot2 <- DF_plasma_plot %>%
-  group_by(ID) %>% 
-  slice(n()) %>% 
+  group_by(ID) %>%
+  slice(n()) %>%
   ungroup()
 
+# Create raincloud plots for different measures
 y_label <- "Years since estimated %p-tau217 positivity"
 at_stage_plot_tira <- makeATStageRaincloud(DF_tira_plot2, years_since_onset, y_label, "TIRA", "groups", show_n = TRUE)
 at_stage_plot_sila <- makeATStageRaincloud(DF_sila_plot2, years_since_onset, y_label, "SILA", "groups", show_n = TRUE)
@@ -469,12 +507,17 @@ y_label <- "Estimated years since symptoms onset"
 at_stage_plot_tira_symps <- makeATStageRaincloud(DF_tira_plot2, years_since_symptoms, y_label, "TIRA", "groups", show_n = TRUE)
 at_stage_plot_sila_symps <- makeATStageRaincloud(DF_sila_plot2, years_since_symptoms, y_label, "SILA", "groups", show_n = TRUE)
 
-pp <- (at_stage_plot_plasma) / 
-  ((at_stage_plot_tira) + (at_stage_plot_sila)) / 
+# Combine all plots into final figure
+pp <- (at_stage_plot_plasma) /
+  ((at_stage_plot_tira) + (at_stage_plot_sila)) /
   ((at_stage_plot_tira_symps) + (at_stage_plot_sila_symps))
+
 pp <- pp +
-  plot_annotation(tag_levels = 'A') & 
+  plot_annotation(tag_levels = 'A') &
   theme(plot.tag = element_text(face = "bold")) +
   theme(plot.tag.position = c(0, 1), plot.tag = element_text(hjust = 0, vjust = 1))
+
 pp
+
+# Save final combined figure
 ggsave("results/at_stage_raincloud_combined_FINAL.png", pp, width = 14, height = 16, dpi = 500, bg = "white")
